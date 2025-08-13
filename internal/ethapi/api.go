@@ -1653,9 +1653,6 @@ func (api *TransactionAPI) sign(addr common.Address, tx *types.Transaction) (*ty
 
 // SubmitTransaction is a helper function that submits tx to txPool and logs a message.
 func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (common.Hash, error) {
-	// Add tracing context if available
-	traceParent, _ := tracing.GetTraceParent(ctx)
-
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
 	if err := checkTxFee(tx.GasPrice(), tx.Gas(), b.RPCTxFeeCap()); err != nil {
@@ -1678,17 +1675,13 @@ func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 
 	if tx.To() == nil {
 		addr := crypto.CreateAddress(from, tx.Nonce())
-		if traceParent != "" {
-			log.Info("Submitted contract creation", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "contract", addr.Hex(), "value", tx.Value(), "trace", traceParent)
-		} else {
-			log.Info("Submitted contract creation", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "contract", addr.Hex(), "value", tx.Value())
-		}
+		tracing.LogWithTrace(ctx, "Submitted contract creation", 
+			"hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), 
+			"contract", addr.Hex(), "value", tx.Value())
 	} else {
-		if traceParent != "" {
-			log.Info("Submitted transaction", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "recipient", tx.To(), "value", tx.Value(), "trace", traceParent)
-		} else {
-			log.Info("Submitted transaction", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "recipient", tx.To(), "value", tx.Value())
-		}
+		tracing.LogWithTrace(ctx, "Submitted transaction", 
+			"hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), 
+			"recipient", tx.To(), "value", tx.Value())
 	}
 	return tx.Hash(), nil
 }
@@ -1754,6 +1747,10 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 	if err := tx.UnmarshalBinary(input); err != nil {
 		return common.Hash{}, err
 	}
+	
+	// Add transaction hash to context for distributed tracing correlation
+	ctx = tracing.SetTxHash(ctx, tx.Hash().Hex())
+	
 	return SubmitTransaction(ctx, api.b, tx)
 }
 

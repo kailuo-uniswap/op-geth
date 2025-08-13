@@ -23,6 +23,7 @@ type contextKey string
 const (
 	traceParentKey contextKey = "traceparent"
 	enabledKey     contextKey = "tracing_enabled"
+	txHashKey      contextKey = "txhash"
 )
 
 // generateTraceID creates a new 32-character hex trace ID
@@ -131,11 +132,27 @@ func isValidTraceParent(traceparent string) bool {
 	return true
 }
 
+// SetTxHash stores transaction hash in the context for trace correlation
+func SetTxHash(ctx context.Context, txHash string) context.Context {
+	return context.WithValue(ctx, txHashKey, txHash)
+}
+
+// GetTxHash returns the transaction hash from context, if any
+func GetTxHash(ctx context.Context) (string, bool) {
+	if txHash, ok := ctx.Value(txHashKey).(string); ok {
+		return txHash, true
+	}
+	return "", false
+}
+
 // LogWithTrace logs a message with trace correlation if tracing is enabled
 func LogWithTrace(ctx context.Context, msg string, keyvals ...interface{}) {
 	if IsTracingEnabled(ctx) {
 		if traceID := GetTraceID(ctx); traceID != "" {
 			keyvals = append(keyvals, "trace_id", traceID)
+		}
+		if txHash, ok := GetTxHash(ctx); ok && txHash != "" {
+			keyvals = append(keyvals, "tx_hash", txHash)
 		}
 	}
 	log.Info(msg, keyvals...)
