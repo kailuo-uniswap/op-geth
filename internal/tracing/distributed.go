@@ -9,6 +9,11 @@ import (
 	"fmt"
 	"net/http"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -24,6 +29,7 @@ const (
 	traceParentKey contextKey = "traceparent"
 	enabledKey     contextKey = "tracing_enabled"
 	txHashKey      contextKey = "txhash"
+	spanKey        contextKey = "otel_span"
 )
 
 // generateTraceID creates a new 32-character hex trace ID
@@ -48,11 +54,25 @@ func ExtractTraceContext(req *http.Request, ctx context.Context) context.Context
 		return ctx
 	}
 
-	// Extract traceparent header
-	if traceparent := req.Header.Get(TraceParentHeader); traceparent != "" {
-		if isValidTraceParent(traceparent) {
-			ctx = context.WithValue(ctx, traceParentKey, traceparent)
-			log.Debug("Extracted trace context", "traceparent", traceparent)
+	// Use OpenTelemetry propagation to extract trace context
+	if IsTracingInitialized() {
+		propagator := otel.GetTextMapPropagator()
+		ctx = propagator.Extract(ctx, propagation.HeaderCarrier(req.Header))
+		
+		// Also store the raw traceparent for backward compatibility
+		if traceparent := req.Header.Get(TraceParentHeader); traceparent != "" {
+			if isValidTraceParent(traceparent) {
+				ctx = context.WithValue(ctx, traceParentKey, traceparent)
+				log.Debug("Extracted trace context", "traceparent", traceparent)
+			}
+		}
+	} else {
+		// Fallback to custom extraction if OpenTelemetry is not initialized
+		if traceparent := req.Header.Get(TraceParentHeader); traceparent != "" {
+			if isValidTraceParent(traceparent) {
+				ctx = context.WithValue(ctx, traceParentKey, traceparent)
+				log.Debug("Extracted trace context", "traceparent", traceparent)
+			}
 		}
 	}
 
@@ -145,8 +165,51 @@ func GetTxHash(ctx context.Context) (string, bool) {
 	return "", false
 }
 
-// LogWithTrace logs a message with trace correlation if tracing is enabled
+// StartSpan creates a new OpenTelemetry span and stores it in the context
+func StartSpan(ctx context.Context, operationName string, attributes ...trace.SpanStartOption) (context.Context, trace.Span) {
+	if !IsTracingInitialized() || !IsTracingEnabled(ctx) {
+		return ctx, trace.SpanFromContext(ctx) // Return no-op span
+	}
+
+	tracer := GetTracer()
+	if tracer == nil {
+		return ctx, trace.SpanFromContext(ctx)
+	}
+
+	ctx, span := tracer.Start(ctx, operationName, attributes...)
+	ctx = context.WithValue(ctx, spanKey, span)
+	
+	return ctx, span
+}
+
+// GetSpan retrieves the current span from context
+func GetSpan(ctx context.Context) trace.Span {
+	if span, ok := ctx.Value(spanKey).(trace.Span); ok {
+		return span
+	}
+	return trace.SpanFromContext(ctx)
+}
+
+// FinishSpan ends the current span with optional error
+func FinishSpan(ctx context.Context, err error) {
+	span := GetSpan(ctx)
+	if span == nil {
+		return
+	}
+	
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+	
+	span.End()
+}
+
+// LogWithTrace logs a message with trace correlation and creates spans if tracing is enabled
 func LogWithTrace(ctx context.Context, msg string, keyvals ...interface{}) {
+	// Add trace correlation to logs
 	if IsTracingEnabled(ctx) {
 		if traceID := GetTraceID(ctx); traceID != "" {
 			keyvals = append(keyvals, "trace_id", traceID)
@@ -155,5 +218,14 @@ func LogWithTrace(ctx context.Context, msg string, keyvals ...interface{}) {
 			keyvals = append(keyvals, "tx_hash", txHash)
 		}
 	}
+	
+	// Create a span event for important logs
+	if IsTracingInitialized() && IsTracingEnabled(ctx) {
+		span := GetSpan(ctx)
+		if span != nil {
+			span.AddEvent(msg)
+		}
+	}
+	
 	log.Info(msg, keyvals...)
 }
