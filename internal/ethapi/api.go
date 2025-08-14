@@ -1788,16 +1788,34 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 	ctx, span := tracing.StartSpan(ctx, "eth.sendRawTransaction")
 	defer tracing.FinishSpan(ctx, nil)
 	
-	// DEBUG: Log span creation result
+	// DEBUG: Log span creation result and context details
 	log.Info("DEBUG: Span created", "span_nil", span == nil)
+	if span != nil {
+		spanCtx := span.SpanContext()
+		log.Info("DEBUG: Span context details", 
+			"trace_id", spanCtx.TraceID().String(),
+			"span_id", spanCtx.SpanID().String(), 
+			"trace_flags", spanCtx.TraceFlags().String(),
+			"is_valid", spanCtx.IsValid(),
+			"is_sampled", spanCtx.IsSampled())
+	}
 	
 	// Add input data attributes to span
 	if tracing.IsTracingInitialized() && span != nil {
-		span.SetAttributes(
+		inputRaw := hex.EncodeToString(input)
+		attrs := []attribute.KeyValue{
 			attribute.String("method", "eth_sendRawTransaction"),
-			attribute.String("input.raw", hex.EncodeToString(input)),
+			attribute.String("input.raw", inputRaw),
 			attribute.Int("input.size", len(input)),
-		)
+		}
+		span.SetAttributes(attrs...)
+		
+		// DEBUG: Log attributes being set
+		log.Info("DEBUG: Setting initial span attributes",
+			"method", "eth_sendRawTransaction",
+			"input_raw_length", len(inputRaw),
+			"input_size", len(input),
+			"num_attributes", len(attrs))
 	}
 	
 	tx := new(types.Transaction)
@@ -1819,28 +1837,41 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 	ctx = tracing.SetTxHash(ctx, txHash)
 	
 	if tracing.IsTracingInitialized() && span != nil {
-		span.SetAttributes(
+		// Collect all transaction attributes
+		txAttrs := []attribute.KeyValue{
 			attribute.String("tx.hash", txHash),
 			attribute.Int("tx.type", int(tx.Type())),
-		)
-		
-		// Add transaction details if available
-		if tx.To() != nil {
-			span.SetAttributes(attribute.String("tx.to", tx.To().Hex()))
-		}
-		if tx.Value() != nil {
-			span.SetAttributes(attribute.String("tx.value", tx.Value().String()))
-		}
-		span.SetAttributes(
 			attribute.Int64("tx.nonce", int64(tx.Nonce())),
 			attribute.Int64("tx.gas", int64(tx.Gas())),
-		)
+		}
+		
+		// Add optional transaction details
+		if tx.To() != nil {
+			txAttrs = append(txAttrs, attribute.String("tx.to", tx.To().Hex()))
+		}
+		if tx.Value() != nil {
+			txAttrs = append(txAttrs, attribute.String("tx.value", tx.Value().String()))
+		}
 		if tx.GasPrice() != nil {
-			span.SetAttributes(attribute.String("tx.gasPrice", tx.GasPrice().String()))
+			txAttrs = append(txAttrs, attribute.String("tx.gasPrice", tx.GasPrice().String()))
 		}
 		if tx.ChainId() != nil {
-			span.SetAttributes(attribute.Int64("tx.chainId", tx.ChainId().Int64()))
+			txAttrs = append(txAttrs, attribute.Int64("tx.chainId", tx.ChainId().Int64()))
 		}
+		
+		// Set all transaction attributes at once
+		span.SetAttributes(txAttrs...)
+		
+		// DEBUG: Log transaction attributes being set
+		log.Info("DEBUG: Setting transaction span attributes",
+			"tx_hash", txHash,
+			"tx_type", int(tx.Type()),
+			"tx_nonce", tx.Nonce(),
+			"tx_gas", tx.Gas(),
+			"tx_to", func() string { if tx.To() != nil { return tx.To().Hex() } else { return "nil" } }(),
+			"tx_value", func() string { if tx.Value() != nil { return tx.Value().String() } else { return "nil" } }(),
+			"chain_id", func() int64 { if tx.ChainId() != nil { return tx.ChainId().Int64() } else { return -1 } }(),
+			"num_tx_attributes", len(txAttrs))
 	}
 	
 	tracing.LogWithTrace(ctx, "Processing transaction", "hash", txHash, "type", int(tx.Type()))
@@ -1863,6 +1894,16 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 	// Mark success in span
 	if tracing.IsTracingInitialized() && span != nil {
 		span.SetAttributes(attribute.Bool("success", true))
+		
+		// DEBUG: Log final span state before finishing
+		spanCtx := span.SpanContext()
+		log.Info("DEBUG: Final span state before finishing",
+			"trace_id", spanCtx.TraceID().String(),
+			"span_id", spanCtx.SpanID().String(),
+			"success", true,
+			"result_hash", result.Hex(),
+			"span_valid", spanCtx.IsValid(),
+			"span_sampled", spanCtx.IsSampled())
 	}
 	tracing.LogWithTrace(ctx, "Transaction submitted successfully", "hash", result.Hex())
 	

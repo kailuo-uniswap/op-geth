@@ -250,6 +250,19 @@ func FinishSpan(ctx context.Context, err error) {
 	}
 	
 	log.Info("Calling span.End() - trace should be emitted now")
+	
+	// DEBUG: Log detailed span information before ending
+	if IsTracingInitialized() {
+		spanContext := span.SpanContext()
+		log.Info("DEBUG: About to end span with full context",
+			"trace_id", spanContext.TraceID().String(),
+			"span_id", spanContext.SpanID().String(),
+			"trace_flags", spanContext.TraceFlags().String(),
+			"is_valid", spanContext.IsValid(),
+			"is_sampled", spanContext.IsSampled(),
+			"is_remote", spanContext.IsRemote())
+	}
+	
 	span.End()
 	log.Info("span.End() completed - trace emitted to OpenTelemetry")
 }
