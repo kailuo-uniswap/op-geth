@@ -4,6 +4,7 @@ package tracing
 import (
 	"context"
 	"os"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -40,24 +41,38 @@ func InitializeTracing() error {
 		otlpEndpoint = "http://localhost:4318" // Default fallback
 	}
 	
-	// DEBUG: Log OTLP configuration
-	log.Info("DEBUG: Configuring OTLP exporter", 
-		"endpoint", otlpEndpoint,
-		"using_default", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "",
+	// DEBUG: Log original OTLP configuration
+	log.Info("DEBUG: Original OTLP endpoint configuration", 
+		"raw_endpoint", otlpEndpoint,
+		"using_default", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "")
+
+	// Fix: Remove http:// scheme to prevent URL corruption in OTLP exporter
+	// The WithEndpoint() function expects host:port format, not full URL
+	cleanEndpoint := otlpEndpoint
+	if strings.HasPrefix(otlpEndpoint, "http://") {
+		cleanEndpoint = strings.TrimPrefix(otlpEndpoint, "http://")
+	}
+	if strings.HasPrefix(otlpEndpoint, "https://") {
+		cleanEndpoint = strings.TrimPrefix(otlpEndpoint, "https://")
+	}
+	
+	// DEBUG: Log cleaned endpoint
+	log.Info("DEBUG: Cleaned OTLP endpoint for exporter", 
+		"clean_endpoint", cleanEndpoint,
 		"insecure", true)
 
-	// Create OTLP HTTP exporter
+	// Create OTLP HTTP exporter with cleaned endpoint
 	exporter, err := otlptracehttp.New(context.Background(),
-		otlptracehttp.WithEndpoint(otlpEndpoint),
+		otlptracehttp.WithEndpoint(cleanEndpoint),
 		otlptracehttp.WithInsecure(), // Use HTTP instead of HTTPS
 	)
 	if err != nil {
-		log.Error("Failed to create OTLP exporter", "error", err, "endpoint", otlpEndpoint)
+		log.Error("Failed to create OTLP exporter", "error", err, "clean_endpoint", cleanEndpoint, "raw_endpoint", otlpEndpoint)
 		return err
 	}
 	
 	// DEBUG: Log successful exporter creation
-	log.Info("DEBUG: OTLP exporter created successfully", "endpoint", otlpEndpoint)
+	log.Info("DEBUG: OTLP exporter created successfully", "clean_endpoint", cleanEndpoint, "raw_endpoint", otlpEndpoint)
 
 	// Create resource with service information
 	serviceName := os.Getenv("DD_SERVICE")
