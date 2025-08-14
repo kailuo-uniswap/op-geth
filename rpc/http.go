@@ -329,8 +329,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, connInfo)
 
-	// Enable tracing if configured
-	if s.enableTracing {
+	// Enable tracing if configured OR if traceparent header is present
+	enableTracingForRequest := s.enableTracing || r.Header.Get("traceparent") != ""
+	if enableTracingForRequest {
 		ctx = tracing.EnableTracing(ctx)
 		ctx = tracing.ExtractTraceContext(r, ctx)
 	}
