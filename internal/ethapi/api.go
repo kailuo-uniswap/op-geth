@@ -1776,9 +1776,20 @@ func (api *TransactionAPI) FillTransaction(ctx context.Context, args Transaction
 // SendRawTransaction will add the signed transaction to the transaction pool.
 // The sender is responsible for signing the transaction and using the correct nonce.
 func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil.Bytes) (common.Hash, error) {
+	// DEBUG: Log entry into SendRawTransaction
+	log.Info("DEBUG: SendRawTransaction called", "input_length", len(input))
+	
+	// DEBUG: Check tracing state before creating span
+	tracingInitialized := tracing.IsTracingInitialized()
+	tracingEnabled := tracing.IsTracingEnabled(ctx)
+	log.Info("DEBUG: Tracing state", "initialized", tracingInitialized, "enabled", tracingEnabled)
+	
 	// Create a span for the entire eth_sendRawTransaction request
 	ctx, span := tracing.StartSpan(ctx, "eth.sendRawTransaction")
 	defer tracing.FinishSpan(ctx, nil)
+	
+	// DEBUG: Log span creation result
+	log.Info("DEBUG: Span created", "span_nil", span == nil)
 	
 	// Add input data attributes to span
 	if tracing.IsTracingInitialized() && span != nil {
