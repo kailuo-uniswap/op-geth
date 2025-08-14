@@ -197,6 +197,40 @@ func FinishSpan(ctx context.Context, err error) {
 		return
 	}
 	
+	// Log detailed span information before ending
+	if IsTracingInitialized() {
+		spanContext := span.SpanContext()
+		traceID := spanContext.TraceID().String()
+		spanID := spanContext.SpanID().String()
+		
+		status := "success"
+		if err != nil {
+			status = "error"
+		}
+		
+		log.Info("Finishing span - about to emit trace", 
+			"trace_id", traceID,
+			"span_id", spanID,
+			"span_name", "eth.sendRawTransaction",
+			"status", status,
+			"has_error", err != nil,
+		)
+		
+		if err != nil {
+			log.Info("Span error details", "error", err.Error())
+		}
+		
+		// Log if we have a traceparent from the original request
+		if traceparent, ok := GetTraceParent(ctx); ok {
+			log.Info("Span traceparent correlation", "original_traceparent", traceparent)
+		}
+		
+		// Log transaction hash if available
+		if txHash, ok := GetTxHash(ctx); ok {
+			log.Info("Span transaction correlation", "tx_hash", txHash)
+		}
+	}
+	
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		span.RecordError(err)
@@ -204,7 +238,9 @@ func FinishSpan(ctx context.Context, err error) {
 		span.SetStatus(codes.Ok, "")
 	}
 	
+	log.Info("Calling span.End() - trace should be emitted now")
 	span.End()
+	log.Info("span.End() completed - trace emitted to OpenTelemetry")
 }
 
 // LogWithTrace logs a message with trace correlation and creates spans if tracing is enabled

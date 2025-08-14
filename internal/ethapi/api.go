@@ -1776,15 +1776,86 @@ func (api *TransactionAPI) FillTransaction(ctx context.Context, args Transaction
 // SendRawTransaction will add the signed transaction to the transaction pool.
 // The sender is responsible for signing the transaction and using the correct nonce.
 func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil.Bytes) (common.Hash, error) {
+	// Create a span for the entire eth_sendRawTransaction request
+	ctx, span := tracing.StartSpan(ctx, "eth.sendRawTransaction")
+	defer tracing.FinishSpan(ctx, nil)
+	
+	// Add input data attributes to span
+	if tracing.IsTracingInitialized() && span != nil {
+		span.SetAttributes(
+			attribute.String("method", "eth_sendRawTransaction"),
+			attribute.String("input.raw", hex.EncodeToString(input)),
+			attribute.Int("input.size", len(input)),
+		)
+	}
+	
 	tx := new(types.Transaction)
 	if err := tx.UnmarshalBinary(input); err != nil {
+		// Add error attributes to span for failed parsing
+		if tracing.IsTracingInitialized() && span != nil {
+			span.SetAttributes(
+				attribute.String("error.type", "unmarshal_failed"),
+				attribute.String("error.message", err.Error()),
+				attribute.Bool("success", false),
+			)
+		}
+		tracing.LogWithTrace(ctx, "Failed to unmarshal transaction", "error", err.Error())
 		return common.Hash{}, err
 	}
 	
-	// Add transaction hash to context for distributed tracing correlation
-	ctx = tracing.SetTxHash(ctx, tx.Hash().Hex())
+	// Add transaction details to span
+	txHash := tx.Hash().Hex()
+	ctx = tracing.SetTxHash(ctx, txHash)
 	
-	return SubmitTransaction(ctx, api.b, tx)
+	if tracing.IsTracingInitialized() && span != nil {
+		span.SetAttributes(
+			attribute.String("tx.hash", txHash),
+			attribute.Int("tx.type", int(tx.Type())),
+		)
+		
+		// Add transaction details if available
+		if tx.To() != nil {
+			span.SetAttributes(attribute.String("tx.to", tx.To().Hex()))
+		}
+		if tx.Value() != nil {
+			span.SetAttributes(attribute.String("tx.value", tx.Value().String()))
+		}
+		span.SetAttributes(
+			attribute.Int64("tx.nonce", int64(tx.Nonce())),
+			attribute.Int64("tx.gas", int64(tx.Gas())),
+		)
+		if tx.GasPrice() != nil {
+			span.SetAttributes(attribute.String("tx.gasPrice", tx.GasPrice().String()))
+		}
+		if tx.ChainId() != nil {
+			span.SetAttributes(attribute.Int64("tx.chainId", tx.ChainId().Int64()))
+		}
+	}
+	
+	tracing.LogWithTrace(ctx, "Processing transaction", "hash", txHash, "type", int(tx.Type()))
+	
+	// Submit transaction and handle any errors
+	result, err := SubmitTransaction(ctx, api.b, tx)
+	if err != nil {
+		// Add error attributes to span for failed submission
+		if tracing.IsTracingInitialized() && span != nil {
+			span.SetAttributes(
+				attribute.String("error.type", "submission_failed"),
+				attribute.String("error.message", err.Error()),
+				attribute.Bool("success", false),
+			)
+		}
+		tracing.LogWithTrace(ctx, "Failed to submit transaction", "hash", txHash, "error", err.Error())
+		return common.Hash{}, err
+	}
+	
+	// Mark success in span
+	if tracing.IsTracingInitialized() && span != nil {
+		span.SetAttributes(attribute.Bool("success", true))
+	}
+	tracing.LogWithTrace(ctx, "Transaction submitted successfully", "hash", result.Hex())
+	
+	return result, nil
 }
 
 // Sign calculates an ECDSA signature for:
