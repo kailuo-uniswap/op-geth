@@ -1665,6 +1665,10 @@ func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 	if err := b.SendTx(ctx, tx); err != nil {
 		return common.Hash{}, err
 	}
+	
+	// Log successful transaction acceptance for distributed tracing
+	tracing.LogWithTrace(ctx, "Transaction accepted for broadcast", "hash", tx.Hash().Hex())
+	
 	// Print a log with full tx details for manual investigations and interventions
 	head := b.CurrentBlock()
 	signer := types.MakeSigner(b.ChainConfig(), head.Number, head.Time)
