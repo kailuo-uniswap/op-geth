@@ -41,8 +41,8 @@ func InitializeTracing() error {
 		otlpEndpoint = "http://localhost:4318" // Default fallback
 	}
 	
-	// DEBUG: Log original OTLP configuration
-	log.Info("DEBUG: Original OTLP endpoint configuration", 
+	// Log OTLP configuration
+	log.Debug("OTLP endpoint configuration", 
 		"raw_endpoint", otlpEndpoint,
 		"using_default", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "")
 
@@ -56,8 +56,8 @@ func InitializeTracing() error {
 		cleanEndpoint = strings.TrimPrefix(otlpEndpoint, "https://")
 	}
 	
-	// DEBUG: Log cleaned endpoint
-	log.Info("DEBUG: Cleaned OTLP endpoint for exporter", 
+	// Log cleaned endpoint
+	log.Debug("Cleaned OTLP endpoint for exporter", 
 		"clean_endpoint", cleanEndpoint,
 		"insecure", true)
 
@@ -71,8 +71,8 @@ func InitializeTracing() error {
 		return err
 	}
 	
-	// DEBUG: Log successful exporter creation
-	log.Info("DEBUG: OTLP exporter created successfully", "clean_endpoint", cleanEndpoint, "raw_endpoint", otlpEndpoint)
+	// Log successful exporter creation
+	log.Debug("OTLP exporter created successfully", "clean_endpoint", cleanEndpoint, "raw_endpoint", otlpEndpoint)
 
 	// Create resource with service information
 	serviceName := os.Getenv("DD_SERVICE")
@@ -90,8 +90,8 @@ func InitializeTracing() error {
 		version = "unknown"
 	}
 
-	// DEBUG: Log resource configuration
-	log.Info("DEBUG: Creating resource with service info",
+	// Log resource configuration
+	log.Debug("Creating resource with service info",
 		"service_name", serviceName,
 		"version", version,
 		"environment", environment)
@@ -108,8 +108,8 @@ func InitializeTracing() error {
 		return err
 	}
 
-	// DEBUG: Log trace provider configuration
-	log.Info("DEBUG: Creating trace provider",
+	// Log trace provider configuration
+	log.Debug("Creating trace provider",
 		"batch_timeout", "1s",
 		"max_batch_size", 100,
 		"sampler", "AlwaysSample")
@@ -124,8 +124,8 @@ func InitializeTracing() error {
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	)
 	
-	// DEBUG: Log trace provider creation success
-	log.Info("DEBUG: Trace provider created successfully")
+	// Log trace provider creation success
+	log.Debug("Trace provider created successfully")
 
 	// Set global trace provider and propagator
 	otel.SetTracerProvider(tp)

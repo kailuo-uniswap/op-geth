@@ -334,8 +334,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	traceparentHeader := r.Header.Get("traceparent")
 	enableTracingForRequest := s.enableTracing || traceparentHeader != ""
 	
-	// DEBUG: Log tracing decision and trace context extraction
-	log.Info("DEBUG: HTTP middleware tracing decision",
+	// Log tracing decision and trace context extraction
+	log.Debug("HTTP middleware tracing decision",
 		"enable_tracing_configured", s.enableTracing,
 		"traceparent_present", traceparentHeader != "",
 		"traceparent_header", traceparentHeader,
@@ -347,13 +347,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx = tracing.EnableTracing(ctx)
 		ctx = tracing.ExtractTraceContext(r, ctx)
 		
-		// DEBUG: Log trace context after extraction
+		// Log trace context after extraction
 		if traceParent, ok := tracing.GetTraceParent(ctx); ok {
-			log.Info("DEBUG: Trace context extracted successfully",
+			log.Debug("Trace context extracted successfully",
 				"traceparent", traceParent,
 				"trace_id", tracing.GetTraceID(ctx))
 		} else {
-			log.Info("DEBUG: No trace context found after extraction")
+			log.Debug("No trace context found after extraction")
 		}
 	}
 

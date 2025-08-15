@@ -167,29 +167,29 @@ func GetTxHash(ctx context.Context) (string, bool) {
 
 // StartSpan creates a new OpenTelemetry span and stores it in the context
 func StartSpan(ctx context.Context, operationName string, attributes ...trace.SpanStartOption) (context.Context, trace.Span) {
-	// DEBUG: Log StartSpan entry
-	log.Info("DEBUG: StartSpan called", "operation", operationName)
+	// Log StartSpan entry
+	log.Debug("StartSpan called", "operation", operationName)
 	
 	initialized := IsTracingInitialized()
 	enabled := IsTracingEnabled(ctx)
-	log.Info("DEBUG: StartSpan checks", "initialized", initialized, "enabled", enabled)
+	log.Debug("StartSpan checks", "initialized", initialized, "enabled", enabled)
 	
 	if !initialized || !enabled {
-		log.Info("DEBUG: StartSpan returning no-op span", "reason", "not_initialized_or_enabled")
+		log.Debug("StartSpan returning no-op span", "reason", "not_initialized_or_enabled")
 		return ctx, trace.SpanFromContext(ctx) // Return no-op span
 	}
 
 	tracer := GetTracer()
 	if tracer == nil {
-		log.Info("DEBUG: StartSpan tracer is nil")
+		log.Debug("StartSpan tracer is nil")
 		return ctx, trace.SpanFromContext(ctx)
 	}
 
-	log.Info("DEBUG: StartSpan about to create real span")
+	log.Debug("StartSpan about to create real span")
 	ctx, span := tracer.Start(ctx, operationName, attributes...)
 	ctx = context.WithValue(ctx, spanKey, span)
 	
-	log.Info("DEBUG: StartSpan created real span", "span_nil", span == nil)
+	log.Debug("StartSpan created real span", "span_nil", span == nil)
 	return ctx, span
 }
 
@@ -251,10 +251,10 @@ func FinishSpan(ctx context.Context, err error) {
 	
 	log.Info("Calling span.End() - trace should be emitted now")
 	
-	// DEBUG: Log detailed span information before ending
+	// Log detailed span information before ending
 	if IsTracingInitialized() {
 		spanContext := span.SpanContext()
-		log.Info("DEBUG: About to end span with full context",
+		log.Debug("About to end span with full context",
 			"trace_id", spanContext.TraceID().String(),
 			"span_id", spanContext.SpanID().String(),
 			"trace_flags", spanContext.TraceFlags().String(),
