@@ -134,7 +134,6 @@ func InitializeTracing() error {
 	tracer = tp.Tracer("github.com/ethereum/go-ethereum/internal/tracing")
 
 	isInitialized = true
-	log.Info("OpenTelemetry tracing initialized", "endpoint", otlpEndpoint, "service", serviceName, "env", environment)
 	return nil
 }
 

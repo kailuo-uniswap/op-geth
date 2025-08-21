@@ -1686,8 +1686,6 @@ func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 		return common.Hash{}, err
 	}
 	
-	// Log transaction addition to pool for distributed tracing
-	tracing.LogWithTrace(ctx, "Adding transaction to local tx pool", "hash", tx.Hash().Hex())
 	
 	if err := b.SendTx(ctx, tx); err != nil {
 		tracing.LogWithTrace(ctx, "Failed to add transaction to tx pool", "hash", tx.Hash().Hex(), "err", err.Error())
@@ -1695,27 +1693,6 @@ func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 		return common.Hash{}, err
 	}
 	
-	// Log successful transaction acceptance for distributed tracing
-	tracing.LogWithTrace(ctx, "Transaction accepted for broadcast", "hash", tx.Hash().Hex())
-	
-	// Print a log with full tx details for manual investigations and interventions
-	head := b.CurrentBlock()
-	signer := types.MakeSigner(b.ChainConfig(), head.Number, head.Time)
-	from, err := types.Sender(signer, tx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	if tx.To() == nil {
-		addr := crypto.CreateAddress(from, tx.Nonce())
-		tracing.LogWithTrace(ctx, "Submitted contract creation", 
-			"hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), 
-			"contract", addr.Hex(), "value", tx.Value())
-	} else {
-		tracing.LogWithTrace(ctx, "Submitted transaction", 
-			"hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), 
-			"recipient", tx.To(), "value", tx.Value())
-	}
 	return tx.Hash(), nil
 }
 
@@ -1838,7 +1815,6 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 		
 	}
 	
-	tracing.LogWithTrace(ctx, "Processing transaction", "hash", txHash, "type", int(tx.Type()))
 	
 	// Submit transaction and handle any errors
 	result, err := SubmitTransaction(ctx, api.b, tx)
@@ -1860,7 +1836,6 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 		span.SetAttributes(attribute.Bool("success", true))
 		
 	}
-	tracing.LogWithTrace(ctx, "Transaction submitted successfully", "hash", result.Hex())
 	
 	return result, nil
 }

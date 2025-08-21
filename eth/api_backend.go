@@ -292,15 +292,12 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 			return err
 		}
 
-		// Log before sending to op-node/sequencer with trace context
-		tracing.LogWithTrace(ctx, "Forwarding transaction to sequencer", "hash", signedTx.Hash().Hex())
 
 		if err := b.eth.seqRPCService.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data)); err != nil {
 			tracing.LogWithTrace(ctx, "Failed to forward transaction to sequencer", "hash", signedTx.Hash().Hex(), "err", err)
 			return err
 		}
 
-		tracing.LogWithTrace(ctx, "Successfully forwarded transaction to sequencer", "hash", signedTx.Hash().Hex())
 		
 		if b.disableTxPool {
 			return nil
@@ -308,8 +305,6 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 		// Retain tx in local tx pool after forwarding, for local RPC usage.
 		if err := b.eth.txPool.Add([]*types.Transaction{signedTx}, false)[0]; err != nil {
 			tracing.LogWithTrace(ctx, "Successfully sent tx to sequencer, but failed to persist in local tx pool", "err", err, "tx", signedTx.Hash())
-		} else {
-			tracing.LogWithTrace(ctx, "Transaction added to local tx pool after sequencer", "hash", signedTx.Hash().Hex())
 		}
 		return nil
 	}
@@ -318,12 +313,10 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 	}
 
 	// Add to transaction pool (non-sequencer mode)
-	tracing.LogWithTrace(ctx, "Adding transaction to local tx pool", "hash", signedTx.Hash().Hex())
 	if err := b.eth.txPool.Add([]*types.Transaction{signedTx}, false)[0]; err != nil {
 		tracing.LogWithTrace(ctx, "Failed to add transaction to tx pool", "hash", signedTx.Hash().Hex(), "err", err)
 		return err
 	}
-	tracing.LogWithTrace(ctx, "Successfully added transaction to tx pool", "hash", signedTx.Hash().Hex())
 	return nil
 }
 
