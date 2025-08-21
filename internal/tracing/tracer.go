@@ -31,7 +31,6 @@ func InitializeTracing() error {
 
 	// Check if tracing should be enabled
 	if os.Getenv("DD_APM_ENABLED") != "true" {
-		log.Debug("APM tracing disabled, DD_APM_ENABLED not set to true")
 		return nil
 	}
 

@@ -333,15 +333,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Enable tracing if configured OR if traceparent header is present
 	traceparentHeader := r.Header.Get("traceparent")
 	enableTracingForRequest := s.enableTracing || traceparentHeader != ""
-	
-	// Log tracing decision and trace context extraction
-	log.Debug("HTTP middleware tracing decision",
-		"enable_tracing_configured", s.enableTracing,
-		"traceparent_present", traceparentHeader != "",
-		"traceparent_header", traceparentHeader,
-		"enable_tracing_for_request", enableTracingForRequest,
-		"request_method", r.Method,
-		"request_path", r.URL.Path)
 		
 	if enableTracingForRequest {
 		ctx = tracing.EnableTracing(ctx)

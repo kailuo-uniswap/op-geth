@@ -1776,29 +1776,9 @@ func (api *TransactionAPI) FillTransaction(ctx context.Context, args Transaction
 // SendRawTransaction will add the signed transaction to the transaction pool.
 // The sender is responsible for signing the transaction and using the correct nonce.
 func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil.Bytes) (common.Hash, error) {
-	// Log entry into SendRawTransaction
-	log.Debug("SendRawTransaction called", "input_length", len(input))
-	
-	// Check tracing state before creating span
-	tracingInitialized := tracing.IsTracingInitialized()
-	tracingEnabled := tracing.IsTracingEnabled(ctx)
-	log.Debug("Tracing state", "initialized", tracingInitialized, "enabled", tracingEnabled)
-	
 	// Create a span for the entire eth_sendRawTransaction request
 	ctx, span := tracing.StartSpan(ctx, "eth.sendRawTransaction")
 	defer tracing.FinishSpan(ctx, nil)
-	
-	// Log span creation result and context details
-	log.Debug("Span created", "span_nil", span == nil)
-	if span != nil {
-		spanCtx := span.SpanContext()
-		log.Debug("Span context details", 
-			"trace_id", spanCtx.TraceID().String(),
-			"span_id", spanCtx.SpanID().String(), 
-			"trace_flags", spanCtx.TraceFlags().String(),
-			"is_valid", spanCtx.IsValid(),
-			"is_sampled", spanCtx.IsSampled())
-	}
 	
 	// Add input data attributes to span
 	if tracing.IsTracingInitialized() && span != nil {
@@ -1810,12 +1790,6 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 		}
 		span.SetAttributes(attrs...)
 		
-		// Log attributes being set
-		log.Debug("Setting initial span attributes",
-			"method", "eth_sendRawTransaction",
-			"input_raw_length", len(inputRaw),
-			"input_size", len(input),
-			"num_attributes", len(attrs))
 	}
 	
 	tx := new(types.Transaction)
@@ -1862,16 +1836,6 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 		// Set all transaction attributes at once
 		span.SetAttributes(txAttrs...)
 		
-		// Log transaction attributes being set
-		log.Debug("Setting transaction span attributes",
-			"tx_hash", txHash,
-			"tx_type", int(tx.Type()),
-			"tx_nonce", tx.Nonce(),
-			"tx_gas", tx.Gas(),
-			"tx_to", func() string { if tx.To() != nil { return tx.To().Hex() } else { return "nil" } }(),
-			"tx_value", func() string { if tx.Value() != nil { return tx.Value().String() } else { return "nil" } }(),
-			"chain_id", func() int64 { if tx.ChainId() != nil { return tx.ChainId().Int64() } else { return -1 } }(),
-			"num_tx_attributes", len(txAttrs))
 	}
 	
 	tracing.LogWithTrace(ctx, "Processing transaction", "hash", txHash, "type", int(tx.Type()))
@@ -1895,15 +1859,6 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 	if tracing.IsTracingInitialized() && span != nil {
 		span.SetAttributes(attribute.Bool("success", true))
 		
-		// Log final span state before finishing
-		spanCtx := span.SpanContext()
-		log.Debug("Final span state before finishing",
-			"trace_id", spanCtx.TraceID().String(),
-			"span_id", spanCtx.SpanID().String(),
-			"success", true,
-			"result_hash", result.Hex(),
-			"span_valid", spanCtx.IsValid(),
-			"span_sampled", spanCtx.IsSampled())
 	}
 	tracing.LogWithTrace(ctx, "Transaction submitted successfully", "hash", result.Hex())
 	
