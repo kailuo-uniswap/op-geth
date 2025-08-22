@@ -1753,6 +1753,8 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 			span.SetAttributes(
 				attribute.String("error.type", "unmarshal_failed"),
 				attribute.String("error.message", err.Error()),
+				attribute.String("input.raw_hex", hex.EncodeToString(input)),
+				attribute.Int("input.size_bytes", len(input)),
 				attribute.Bool("success", false),
 			)
 		}
