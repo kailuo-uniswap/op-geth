@@ -1751,10 +1751,12 @@ func (api *TransactionAPI) FillTransaction(ctx context.Context, args Transaction
 
 // SendRawTransaction will add the signed transaction to the transaction pool.
 // The sender is responsible for signing the transaction and using the correct nonce.
-func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil.Bytes) (common.Hash, error) {
+func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil.Bytes) (result common.Hash, err error) {
 	// Create a span for the entire eth_sendRawTransaction request
 	ctx, span := tracing.StartSpan(ctx, "eth.sendRawTransaction")
-	defer tracing.FinishSpan(ctx, nil)
+	defer func() {
+		tracing.FinishSpan(ctx, err)
+	}()
 
 	// Add input data attributes to span
 	if tracing.IsTracingInitialized() && span != nil {
@@ -1768,7 +1770,7 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 	}
 
 	tx := new(types.Transaction)
-	if err := tx.UnmarshalBinary(input); err != nil {
+	if err = tx.UnmarshalBinary(input); err != nil {
 		// Add error attributes to span for failed parsing
 		if tracing.IsTracingInitialized() && span != nil {
 			span.SetAttributes(
@@ -1813,7 +1815,7 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 	}
 
 	// Submit transaction and handle any errors
-	result, err := SubmitTransaction(ctx, api.b, tx)
+	result, err = SubmitTransaction(ctx, api.b, tx)
 	if err != nil {
 		// Add error attributes to span for failed submission
 		if tracing.IsTracingInitialized() && span != nil {
