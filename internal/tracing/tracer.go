@@ -1,13 +1,16 @@
-// Package tracing provides OpenTelemetry initialization for op-geth.
+// Package tracing provides OpenTelemetry initialization and distributed tracing utilities for op-geth.
 package tracing
 
 import (
 	"context"
-	"os"
-	"strings"
-	"time"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"net/http"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -20,127 +23,59 @@ import (
 
 var (
 	tracer trace.Tracer
-	isInitialized bool
+)
+
+const (
+	// W3C TraceContext header
+	TraceParentHeader = "traceparent"
+)
+
+// Context keys for storing trace information
+type contextKey string
+
+const (
+	traceParentKey contextKey = "traceparent"
+	enabledKey     contextKey = "tracing_enabled"
+	txHashKey      contextKey = "txhash"
+	spanKey        contextKey = "otel_span"
 )
 
 // InitializeTracing sets up OpenTelemetry tracing for op-geth
-func InitializeTracing() error {
-	if isInitialized {
-		return nil
+func InitializeTracing(serviceName string) error {
+	if tracer != nil {
+		return nil // Already initialized
 	}
 
-	// Check if tracing should be enabled
-	if os.Getenv("DD_APM_ENABLED") != "true" {
-		return nil
-	}
-
-	// Get OTLP endpoint from environment
-	otlpEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if otlpEndpoint == "" {
-		otlpEndpoint = "http://localhost:4318" // Default fallback
-	}
-	
-	// Log OTLP configuration
-	log.Debug("OTLP endpoint configuration", 
-		"raw_endpoint", otlpEndpoint,
-		"using_default", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "")
-
-	// Fix: Remove http:// scheme to prevent URL corruption in OTLP exporter
-	// The WithEndpoint() function expects host:port format, not full URL
-	cleanEndpoint := otlpEndpoint
-	if strings.HasPrefix(otlpEndpoint, "http://") {
-		cleanEndpoint = strings.TrimPrefix(otlpEndpoint, "http://")
-	}
-	if strings.HasPrefix(otlpEndpoint, "https://") {
-		cleanEndpoint = strings.TrimPrefix(otlpEndpoint, "https://")
-	}
-	
-	// Log cleaned endpoint
-	log.Debug("Cleaned OTLP endpoint for exporter", 
-		"clean_endpoint", cleanEndpoint,
-		"insecure", true)
-
-	// Create OTLP HTTP exporter with cleaned endpoint
-	exporter, err := otlptracehttp.New(context.Background(),
-		otlptracehttp.WithEndpoint(cleanEndpoint),
-		otlptracehttp.WithInsecure(), // Use HTTP instead of HTTPS
-	)
-	if err != nil {
-		log.Error("Failed to create OTLP exporter", "error", err, "clean_endpoint", cleanEndpoint, "raw_endpoint", otlpEndpoint)
-		return err
-	}
-	
-	// Log successful exporter creation
-	log.Debug("OTLP exporter created successfully", "clean_endpoint", cleanEndpoint, "raw_endpoint", otlpEndpoint)
-
-	// Create resource with service information
-	serviceName := os.Getenv("DD_SERVICE")
 	if serviceName == "" {
 		serviceName = "op-geth"
 	}
 
-	environment := os.Getenv("DD_ENV")
-	if environment == "" {
-		environment = "development"
-	}
-
-	version := os.Getenv("DD_VERSION")
-	if version == "" {
-		version = "unknown"
-	}
-
-	// Log resource configuration
-	log.Debug("Creating resource with service info",
-		"service_name", serviceName,
-		"version", version,
-		"environment", environment)
-
-	resource, err := resource.New(context.Background(),
-		resource.WithAttributes(
-			semconv.ServiceName(serviceName),
-			semconv.ServiceVersion(version),
-			semconv.DeploymentEnvironment(environment),
-		),
-	)
+	var exporter sdktrace.SpanExporter
+	var err error
+	// Refer to https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/ for
+	// how to configure the otlp exporter endpoints using env variables
+	exporter, err = otlptracehttp.New(context.Background())
 	if err != nil {
-		log.Error("Failed to create resource", "error", err)
-		return err
+		return fmt.Errorf("failed to initialize OTLP exporter: %w", err)
 	}
 
-	// Log trace provider configuration
-	log.Debug("Creating trace provider",
-		"batch_timeout", "1s",
-		"max_batch_size", 100,
-		"sampler", "AlwaysSample")
-
-	// Create trace provider
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter,
-			sdktrace.WithBatchTimeout(1*time.Second),
-			sdktrace.WithMaxExportBatchSize(100),
-		),
-		sdktrace.WithResource(resource),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String(serviceName),
+		)),
 	)
-	
-	// Log trace provider creation success
-	log.Debug("Trace provider created successfully")
-
-	// Set global trace provider and propagator
 	otel.SetTracerProvider(tp)
-	otel.SetTextMapPropagator(propagation.TraceContext{})
+	tracer = otel.Tracer("op-geth")
 
-	// Get tracer instance
-	tracer = tp.Tracer("github.com/ethereum/go-ethereum/internal/tracing")
-
-	isInitialized = true
 	return nil
 }
 
 // GetTracer returns the global tracer instance
 func GetTracer() trace.Tracer {
-	if !isInitialized {
-		if err := InitializeTracing(); err != nil {
+	if tracer == nil {
+		if err := InitializeTracing("op-geth"); err != nil {
 			log.Error("Failed to initialize tracing", "error", err)
 			return nil
 		}
@@ -150,5 +85,213 @@ func GetTracer() trace.Tracer {
 
 // IsTracingInitialized returns true if OpenTelemetry tracing is initialized
 func IsTracingInitialized() bool {
-	return isInitialized && tracer != nil
+	return tracer != nil
+}
+
+// generateTraceID creates a new 32-character hex trace ID
+func generateTraceID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// generateSpanID creates a new 16-character hex span ID
+func generateSpanID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// ExtractTraceContext extracts W3C TraceContext headers from the incoming request
+// and stores them in the context for later propagation
+func ExtractTraceContext(req *http.Request, ctx context.Context) context.Context {
+	// Check if tracing is enabled in this context
+	if enabled, ok := ctx.Value(enabledKey).(bool); !ok || !enabled {
+		return ctx
+	}
+
+	// Use OpenTelemetry propagation to extract trace context
+	if IsTracingInitialized() {
+		propagator := otel.GetTextMapPropagator()
+		ctx = propagator.Extract(ctx, propagation.HeaderCarrier(req.Header))
+
+		// Also store the raw traceparent for backward compatibility
+		if traceparent := req.Header.Get(TraceParentHeader); traceparent != "" {
+			if isValidTraceParent(traceparent) {
+				ctx = context.WithValue(ctx, traceParentKey, traceparent)
+				log.Debug("Extracted trace context", "traceparent", traceparent)
+			}
+		}
+	} else {
+		// Fallback to custom extraction if OpenTelemetry is not initialized
+		if traceparent := req.Header.Get(TraceParentHeader); traceparent != "" {
+			if isValidTraceParent(traceparent) {
+				ctx = context.WithValue(ctx, traceParentKey, traceparent)
+				log.Debug("Extracted trace context", "traceparent", traceparent)
+			}
+		}
+	}
+
+	return ctx
+}
+
+// CreateTraceContext generates a new trace context from request data
+func CreateTraceContext(requestData []byte, ctx context.Context) context.Context {
+	// Check if tracing is enabled
+	if enabled, ok := ctx.Value(enabledKey).(bool); !ok || !enabled {
+		return ctx
+	}
+
+	// Generate new trace and span IDs
+	traceID := generateTraceID()
+	spanID := generateSpanID()
+
+	// Create W3C traceparent header: version-traceid-spanid-flags
+	// Version: 00, Flags: 01 (sampled)
+	traceparent := fmt.Sprintf("00-%s-%s-01", traceID, spanID)
+
+	// Store hash of request data for correlation (optional, for debugging)
+	if len(requestData) > 0 {
+		bodyHash := hashRequestData(requestData)
+		log.Debug("Created trace context", "traceparent", traceparent, "data_hash", bodyHash)
+	}
+
+	return context.WithValue(ctx, traceParentKey, traceparent)
+}
+
+// GetTraceParent returns the traceparent value from context, if any
+func GetTraceParent(ctx context.Context) (string, bool) {
+	if traceparent, ok := ctx.Value(traceParentKey).(string); ok {
+		return traceparent, true
+	}
+	return "", false
+}
+
+// EnableTracing adds tracing enabled flag to context
+func EnableTracing(ctx context.Context) context.Context {
+	return context.WithValue(ctx, enabledKey, true)
+}
+
+// IsTracingEnabled checks if tracing is enabled in the context
+func IsTracingEnabled(ctx context.Context) bool {
+	if enabled, ok := ctx.Value(enabledKey).(bool); ok {
+		return enabled
+	}
+	return false
+}
+
+// GetTraceID extracts the trace ID from the traceparent header in the context
+func GetTraceID(ctx context.Context) string {
+	if traceparent, ok := ctx.Value(traceParentKey).(string); ok && len(traceparent) >= 36 {
+		// Extract trace ID from traceparent format: 00-TRACEID-SPANID-01
+		// TraceID is at positions 3-34 (32 chars)
+		return traceparent[3:35]
+	}
+	return ""
+}
+
+// hashRequestData creates a SHA256 hash of the request data for trace correlation
+func hashRequestData(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:8]) // Use first 8 bytes for brevity
+}
+
+// isValidTraceParent validates the format of a traceparent header
+// Basic validation - should be 55 characters in format: 00-{32hex}-{16hex}-{2hex}
+func isValidTraceParent(traceparent string) bool {
+	if len(traceparent) != 55 {
+		return false
+	}
+	if traceparent[2] != '-' || traceparent[35] != '-' || traceparent[52] != '-' {
+		return false
+	}
+	return true
+}
+
+// SetTxHash stores transaction hash in the context for trace correlation
+func SetTxHash(ctx context.Context, txHash string) context.Context {
+	return context.WithValue(ctx, txHashKey, txHash)
+}
+
+// GetTxHash returns the transaction hash from context, if any
+func GetTxHash(ctx context.Context) (string, bool) {
+	if txHash, ok := ctx.Value(txHashKey).(string); ok {
+		return txHash, true
+	}
+	return "", false
+}
+
+// StartSpan creates a new OpenTelemetry span and stores it in the context
+func StartSpan(ctx context.Context, operationName string, attributes ...trace.SpanStartOption) (context.Context, trace.Span) {
+	initialized := IsTracingInitialized()
+	enabled := IsTracingEnabled(ctx)
+
+	if !initialized || !enabled {
+		return ctx, trace.SpanFromContext(ctx) // Return no-op span
+	}
+
+	tracer := GetTracer()
+	if tracer == nil {
+		return ctx, trace.SpanFromContext(ctx)
+	}
+
+	ctx, span := tracer.Start(ctx, operationName, attributes...)
+	ctx = context.WithValue(ctx, spanKey, span)
+	return ctx, span
+}
+
+// GetSpan retrieves the current span from context
+func GetSpan(ctx context.Context) trace.Span {
+	if span, ok := ctx.Value(spanKey).(trace.Span); ok {
+		return span
+	}
+	return trace.SpanFromContext(ctx)
+}
+
+// FinishSpan ends the current span with optional error
+func FinishSpan(ctx context.Context, err error) {
+	span := GetSpan(ctx)
+	if span == nil {
+		return
+	}
+
+	// Only log error details if there's an error
+	if IsTracingInitialized() && err != nil {
+		spanContext := span.SpanContext()
+		traceID := spanContext.TraceID().String()
+		spanID := spanContext.SpanID().String()
+		log.Error("Span finished with error", "error", err.Error(), "trace_id", traceID, "span_id", spanID)
+	}
+
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+
+	span.End()
+}
+
+// LogWithTrace logs an error message with trace correlation and creates spans if tracing is enabled
+func LogWithTrace(ctx context.Context, msg string, keyvals ...any) {
+	// Add trace correlation to logs
+	if IsTracingEnabled(ctx) {
+		if traceID := GetTraceID(ctx); traceID != "" {
+			keyvals = append(keyvals, "trace_id", traceID)
+		}
+		if txHash, ok := GetTxHash(ctx); ok && txHash != "" {
+			keyvals = append(keyvals, "tx_hash", txHash)
+		}
+	}
+
+	// Create a span event for error logs
+	if IsTracingInitialized() && IsTracingEnabled(ctx) {
+		span := GetSpan(ctx)
+		if span != nil {
+			span.AddEvent(msg)
+		}
+	}
+
+	log.Error(msg, keyvals...)
 }

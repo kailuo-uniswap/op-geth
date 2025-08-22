@@ -44,12 +44,12 @@ import (
 	"github.com/ethereum/go-ethereum/internal/ethapi/override"
 	"github.com/ethereum/go-ethereum/internal/tracing"
 	"github.com/ethereum/go-ethereum/log"
-	"go.opentelemetry.io/otel/attribute"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/trie"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
@@ -1657,7 +1657,7 @@ func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 	// Create a span for transaction submission
 	ctx, span := tracing.StartSpan(ctx, "eth.submitTransaction")
 	defer tracing.FinishSpan(ctx, nil)
-	
+
 	// Add transaction details to span
 	if tracing.IsTracingInitialized() && span != nil {
 		span.SetAttributes(
@@ -1669,10 +1669,10 @@ func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 			attribute.String("tx.gasPrice", tx.GasPrice().String()),
 		)
 	}
-	
+
 	// Store transaction hash in context for correlation
 	ctx = tracing.SetTxHash(ctx, tx.Hash().Hex())
-	
+
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
 	if err := checkTxFee(tx.GasPrice(), tx.Gas(), b.RPCTxFeeCap()); err != nil {
@@ -1685,14 +1685,13 @@ func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 		tracing.FinishSpan(ctx, err)
 		return common.Hash{}, err
 	}
-	
-	
+
 	if err := b.SendTx(ctx, tx); err != nil {
 		tracing.LogWithTrace(ctx, "Failed to add transaction to tx pool", "hash", tx.Hash().Hex(), "err", err.Error())
 		tracing.FinishSpan(ctx, err)
 		return common.Hash{}, err
 	}
-	
+
 	return tx.Hash(), nil
 }
 
@@ -1756,7 +1755,7 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 	// Create a span for the entire eth_sendRawTransaction request
 	ctx, span := tracing.StartSpan(ctx, "eth.sendRawTransaction")
 	defer tracing.FinishSpan(ctx, nil)
-	
+
 	// Add input data attributes to span
 	if tracing.IsTracingInitialized() && span != nil {
 		inputRaw := hex.EncodeToString(input)
@@ -1766,9 +1765,8 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 			attribute.Int("input.size", len(input)),
 		}
 		span.SetAttributes(attrs...)
-		
 	}
-	
+
 	tx := new(types.Transaction)
 	if err := tx.UnmarshalBinary(input); err != nil {
 		// Add error attributes to span for failed parsing
@@ -1782,11 +1780,11 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 		tracing.LogWithTrace(ctx, "Failed to unmarshal transaction", "error", err.Error())
 		return common.Hash{}, err
 	}
-	
+
 	// Add transaction details to span
 	txHash := tx.Hash().Hex()
 	ctx = tracing.SetTxHash(ctx, txHash)
-	
+
 	if tracing.IsTracingInitialized() && span != nil {
 		// Collect all transaction attributes
 		txAttrs := []attribute.KeyValue{
@@ -1795,7 +1793,7 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 			attribute.Int64("tx.nonce", int64(tx.Nonce())),
 			attribute.Int64("tx.gas", int64(tx.Gas())),
 		}
-		
+
 		// Add optional transaction details
 		if tx.To() != nil {
 			txAttrs = append(txAttrs, attribute.String("tx.to", tx.To().Hex()))
@@ -1809,13 +1807,11 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 		if tx.ChainId() != nil {
 			txAttrs = append(txAttrs, attribute.Int64("tx.chainId", tx.ChainId().Int64()))
 		}
-		
+
 		// Set all transaction attributes at once
 		span.SetAttributes(txAttrs...)
-		
 	}
-	
-	
+
 	// Submit transaction and handle any errors
 	result, err := SubmitTransaction(ctx, api.b, tx)
 	if err != nil {
@@ -1830,13 +1826,12 @@ func (api *TransactionAPI) SendRawTransaction(ctx context.Context, input hexutil
 		tracing.LogWithTrace(ctx, "Failed to submit transaction", "hash", txHash, "error", err.Error())
 		return common.Hash{}, err
 	}
-	
+
 	// Mark success in span
 	if tracing.IsTracingInitialized() && span != nil {
 		span.SetAttributes(attribute.Bool("success", true))
-		
 	}
-	
+
 	return result, nil
 }
 

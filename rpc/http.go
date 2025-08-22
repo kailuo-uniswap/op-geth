@@ -333,11 +333,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Enable tracing if configured OR if traceparent header is present
 	traceparentHeader := r.Header.Get("traceparent")
 	enableTracingForRequest := s.enableTracing || traceparentHeader != ""
-		
+
 	if enableTracingForRequest {
 		ctx = tracing.EnableTracing(ctx)
 		ctx = tracing.ExtractTraceContext(r, ctx)
-		
+
 		// Log trace context after extraction
 		if traceParent, ok := tracing.GetTraceParent(ctx); ok {
 			log.Debug("Trace context extracted successfully",

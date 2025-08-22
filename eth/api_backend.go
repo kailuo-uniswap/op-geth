@@ -292,13 +292,11 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 			return err
 		}
 
-
 		if err := b.eth.seqRPCService.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data)); err != nil {
 			tracing.LogWithTrace(ctx, "Failed to forward transaction to sequencer", "hash", signedTx.Hash().Hex(), "err", err)
 			return err
 		}
 
-		
 		if b.disableTxPool {
 			return nil
 		}

@@ -371,7 +371,7 @@ func geth(ctx *cli.Context) error {
 	}
 
 	// Initialize OpenTelemetry tracing if enabled
-	if err := tracing.InitializeTracing(); err != nil {
+	if err := tracing.InitializeTracing("op-geth"); err != nil {
 		log.Error("Failed to initialize tracing", "error", err)
 	}
 
