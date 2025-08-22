@@ -1,0 +1,191 @@
+// Package tracing provides OpenTelemetry initialization and distributed tracing utilities for op-geth.
+package tracing
+
+import (
+	"context"
+	"fmt"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.25.0"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/ethereum/go-ethereum/log"
+)
+
+var (
+	tracer trace.Tracer
+)
+
+// Context keys for storing trace information
+type contextKey string
+
+const (
+	enabledKey contextKey = "tracing_enabled"
+	txHashKey  contextKey = "txhash"
+	spanKey    contextKey = "otel_span"
+)
+
+// InitializeTracing sets up OpenTelemetry tracing for op-geth
+func InitializeTracing(serviceName string) error {
+	if tracer != nil {
+		return nil // Already initialized
+	}
+
+	if serviceName == "" {
+		serviceName = "op-geth"
+	}
+
+	var exporter sdktrace.SpanExporter
+	var err error
+	// Refer to https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/ for
+	// how to configure the otlp exporter endpoints using env variables
+	exporter, err = otlptracehttp.New(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to initialize OTLP exporter: %w", err)
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String(serviceName),
+		)),
+	)
+	otel.SetTracerProvider(tp)
+	tracer = otel.Tracer("op-geth")
+
+	return nil
+}
+
+// GetTracer returns the global tracer instance
+func GetTracer() trace.Tracer {
+	if tracer == nil {
+		if err := InitializeTracing("op-geth"); err != nil {
+			log.Error("Failed to initialize tracing", "error", err)
+			return nil
+		}
+	}
+	return tracer
+}
+
+// IsTracingInitialized returns true if OpenTelemetry tracing is initialized
+func IsTracingInitialized() bool {
+	return tracer != nil
+}
+
+// EnableTracing adds tracing enabled flag to context
+func EnableTracing(ctx context.Context) context.Context {
+	return context.WithValue(ctx, enabledKey, true)
+}
+
+// IsTracingEnabled checks if tracing is enabled in the context
+func IsTracingEnabled(ctx context.Context) bool {
+	if enabled, ok := ctx.Value(enabledKey).(bool); ok {
+		return enabled
+	}
+	return false
+}
+
+// GetTraceID extracts the trace ID from the active span in the context
+func GetTraceID(ctx context.Context) string {
+	span := trace.SpanFromContext(ctx)
+	if span != nil {
+		spanContext := span.SpanContext()
+		if spanContext.IsValid() {
+			return spanContext.TraceID().String()
+		}
+	}
+	return ""
+}
+
+// SetTxHash stores transaction hash in the context for trace correlation
+func SetTxHash(ctx context.Context, txHash string) context.Context {
+	return context.WithValue(ctx, txHashKey, txHash)
+}
+
+// GetTxHash returns the transaction hash from context, if any
+func GetTxHash(ctx context.Context) (string, bool) {
+	if txHash, ok := ctx.Value(txHashKey).(string); ok {
+		return txHash, true
+	}
+	return "", false
+}
+
+// StartSpan creates a new OpenTelemetry span and stores it in the context
+func StartSpan(ctx context.Context, operationName string, attributes ...trace.SpanStartOption) (context.Context, trace.Span) {
+	initialized := IsTracingInitialized()
+	enabled := IsTracingEnabled(ctx)
+
+	if !initialized || !enabled {
+		return ctx, trace.SpanFromContext(ctx) // Return no-op span
+	}
+
+	tracer := GetTracer()
+	if tracer == nil {
+		return ctx, trace.SpanFromContext(ctx)
+	}
+
+	ctx, span := tracer.Start(ctx, operationName, attributes...)
+	ctx = context.WithValue(ctx, spanKey, span)
+	return ctx, span
+}
+
+// GetSpan retrieves the current span from context
+func GetSpan(ctx context.Context) trace.Span {
+	if span, ok := ctx.Value(spanKey).(trace.Span); ok {
+		return span
+	}
+	return trace.SpanFromContext(ctx)
+}
+
+// FinishSpan ends the current span with optional error
+func FinishSpan(ctx context.Context, err error) {
+	span := GetSpan(ctx)
+	if span == nil {
+		return
+	}
+
+	// Only log error details if there's an error
+	if IsTracingInitialized() && err != nil {
+		spanContext := span.SpanContext()
+		traceID := spanContext.TraceID().String()
+		spanID := spanContext.SpanID().String()
+		log.Error("Span finished with error", "error", err.Error(), "trace_id", traceID, "span_id", spanID)
+	}
+
+	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+	} else {
+		span.SetStatus(codes.Ok, "")
+	}
+
+	span.End()
+}
+
+// LogWithTrace logs an error message with trace correlation and creates spans if tracing is enabled
+func LogWithTrace(ctx context.Context, msg string, keyvals ...any) {
+	// Add trace correlation to logs
+	if IsTracingEnabled(ctx) {
+		if traceID := GetTraceID(ctx); traceID != "" {
+			keyvals = append(keyvals, "trace_id", traceID)
+		}
+		if txHash, ok := GetTxHash(ctx); ok && txHash != "" {
+			keyvals = append(keyvals, "tx_hash", txHash)
+		}
+	}
+
+	// Create a span event for error logs
+	if IsTracingInitialized() && IsTracingEnabled(ctx) {
+		span := GetSpan(ctx)
+		if span != nil {
+			span.AddEvent(msg)
+		}
+	}
+
+	log.Error(msg, keyvals...)
+}

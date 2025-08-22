@@ -40,6 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/internal/tracing"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -291,9 +292,12 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 		if err != nil {
 			return err
 		}
+
 		if err := b.eth.seqRPCService.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data)); err != nil {
+			tracing.LogWithTrace(ctx, "Failed to forward transaction to sequencer", "hash", signedTx.Hash().Hex(), "err", err)
 			return err
 		}
+
 		if b.disableTxPool {
 			return nil
 		}
@@ -307,7 +311,12 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 		return nil
 	}
 
-	return b.eth.txPool.Add([]*types.Transaction{signedTx}, false)[0]
+	// Add to transaction pool (non-sequencer mode)
+	if err := b.eth.txPool.Add([]*types.Transaction{signedTx}, false)[0]; err != nil {
+		tracing.LogWithTrace(ctx, "Failed to add transaction to tx pool", "hash", signedTx.Hash().Hex(), "err", err)
+		return err
+	}
+	return nil
 }
 
 func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {
