@@ -4,12 +4,10 @@ package tracing
 import (
 	"context"
 	"fmt"
-	"net/http"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.25.0"
@@ -22,19 +20,13 @@ var (
 	tracer trace.Tracer
 )
 
-const (
-	// W3C TraceContext header
-	TraceParentHeader = "traceparent"
-)
-
 // Context keys for storing trace information
 type contextKey string
 
 const (
-	traceParentKey contextKey = "traceparent"
-	enabledKey     contextKey = "tracing_enabled"
-	txHashKey      contextKey = "txhash"
-	spanKey        contextKey = "otel_span"
+	enabledKey contextKey = "tracing_enabled"
+	txHashKey  contextKey = "txhash"
+	spanKey    contextKey = "otel_span"
 )
 
 // InitializeTracing sets up OpenTelemetry tracing for op-geth
@@ -85,47 +77,6 @@ func IsTracingInitialized() bool {
 	return tracer != nil
 }
 
-// ExtractTraceContext extracts W3C TraceContext headers from the incoming request
-// and stores them in the context for later propagation
-func ExtractTraceContext(req *http.Request, ctx context.Context) context.Context {
-	// Check if tracing is enabled in this context
-	if enabled, ok := ctx.Value(enabledKey).(bool); !ok || !enabled {
-		return ctx
-	}
-
-	// Use OpenTelemetry propagation to extract trace context
-	if IsTracingInitialized() {
-		propagator := otel.GetTextMapPropagator()
-		ctx = propagator.Extract(ctx, propagation.HeaderCarrier(req.Header))
-
-		// Also store the raw traceparent for backward compatibility
-		if traceparent := req.Header.Get(TraceParentHeader); traceparent != "" {
-			if isValidTraceParent(traceparent) {
-				ctx = context.WithValue(ctx, traceParentKey, traceparent)
-				log.Debug("Extracted trace context", "traceparent", traceparent)
-			}
-		}
-	} else {
-		// Fallback to custom extraction if OpenTelemetry is not initialized
-		if traceparent := req.Header.Get(TraceParentHeader); traceparent != "" {
-			if isValidTraceParent(traceparent) {
-				ctx = context.WithValue(ctx, traceParentKey, traceparent)
-				log.Debug("Extracted trace context", "traceparent", traceparent)
-			}
-		}
-	}
-
-	return ctx
-}
-
-// GetTraceParent returns the traceparent value from context, if any
-func GetTraceParent(ctx context.Context) (string, bool) {
-	if traceparent, ok := ctx.Value(traceParentKey).(string); ok {
-		return traceparent, true
-	}
-	return "", false
-}
-
 // EnableTracing adds tracing enabled flag to context
 func EnableTracing(ctx context.Context) context.Context {
 	return context.WithValue(ctx, enabledKey, true)
@@ -139,26 +90,16 @@ func IsTracingEnabled(ctx context.Context) bool {
 	return false
 }
 
-// GetTraceID extracts the trace ID from the traceparent header in the context
+// GetTraceID extracts the trace ID from the active span in the context
 func GetTraceID(ctx context.Context) string {
-	if traceparent, ok := ctx.Value(traceParentKey).(string); ok && len(traceparent) >= 36 {
-		// Extract trace ID from traceparent format: 00-TRACEID-SPANID-01
-		// TraceID is at positions 3-34 (32 chars)
-		return traceparent[3:35]
+	span := trace.SpanFromContext(ctx)
+	if span != nil {
+		spanContext := span.SpanContext()
+		if spanContext.IsValid() {
+			return spanContext.TraceID().String()
+		}
 	}
 	return ""
-}
-
-// isValidTraceParent validates the format of a traceparent header
-// Basic validation - should be 55 characters in format: 00-{32hex}-{16hex}-{2hex}
-func isValidTraceParent(traceparent string) bool {
-	if len(traceparent) != 55 {
-		return false
-	}
-	if traceparent[2] != '-' || traceparent[35] != '-' || traceparent[52] != '-' {
-		return false
-	}
-	return true
 }
 
 // SetTxHash stores transaction hash in the context for trace correlation

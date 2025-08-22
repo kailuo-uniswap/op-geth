@@ -32,7 +32,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/internal/tracing"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 const (
@@ -330,22 +329,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, connInfo)
 
-	// Enable tracing if configured OR if traceparent header is present
-	traceparentHeader := r.Header.Get("traceparent")
-	enableTracingForRequest := s.enableTracing || traceparentHeader != ""
-
-	if enableTracingForRequest {
+	// Enable tracing if configured
+	if s.enableTracing {
 		ctx = tracing.EnableTracing(ctx)
-		ctx = tracing.ExtractTraceContext(r, ctx)
-
-		// Log trace context after extraction
-		if traceParent, ok := tracing.GetTraceParent(ctx); ok {
-			log.Debug("Trace context extracted successfully",
-				"traceparent", traceParent,
-				"trace_id", tracing.GetTraceID(ctx))
-		} else {
-			log.Debug("No trace context found after extraction")
-		}
 	}
 
 	// All checks passed, create a codec that reads directly from the request body
