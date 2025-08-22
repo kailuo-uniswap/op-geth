@@ -1654,41 +1654,18 @@ func (api *TransactionAPI) sign(addr common.Address, tx *types.Transaction) (*ty
 
 // SubmitTransaction is a helper function that submits tx to txPool and logs a message.
 func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (common.Hash, error) {
-	// Create a span for transaction submission
-	ctx, span := tracing.StartSpan(ctx, "eth.submitTransaction")
-	defer tracing.FinishSpan(ctx, nil)
-
-	// Add transaction details to span
-	if tracing.IsTracingInitialized() && span != nil {
-		span.SetAttributes(
-			attribute.String("tx.hash", tx.Hash().Hex()),
-			attribute.String("tx.to", tx.To().Hex()),
-			attribute.Int64("tx.nonce", int64(tx.Nonce())),
-			attribute.String("tx.value", tx.Value().String()),
-			attribute.Int64("tx.gas", int64(tx.Gas())),
-			attribute.String("tx.gasPrice", tx.GasPrice().String()),
-		)
-	}
-
-	// Store transaction hash in context for correlation
-	ctx = tracing.SetTxHash(ctx, tx.Hash().Hex())
-
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
 	if err := checkTxFee(tx.GasPrice(), tx.Gas(), b.RPCTxFeeCap()); err != nil {
-		tracing.FinishSpan(ctx, err)
 		return common.Hash{}, err
 	}
 	if !b.UnprotectedAllowed() && !tx.Protected() {
 		// Ensure only eip155 signed transactions are submitted if EIP155Required is set.
-		err := errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
-		tracing.FinishSpan(ctx, err)
-		return common.Hash{}, err
+		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 
 	if err := b.SendTx(ctx, tx); err != nil {
 		tracing.LogWithTrace(ctx, "Failed to add transaction to tx pool", "hash", tx.Hash().Hex(), "err", err.Error())
-		tracing.FinishSpan(ctx, err)
 		return common.Hash{}, err
 	}
 
